@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use futures::StreamExt;
 use rocket::{response::stream::{EventStream, Event}, Shutdown};
 use services::pump;
 
@@ -14,27 +15,18 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-struct DropGuard;
-
-impl Drop for DropGuard {
-    fn drop(&mut self) {
-        eprintln!("\n\n\n\n\n\n\n\n\n\n\\nn-- DROPPED --\n\n\n\n\nn");
-    }
-}
 #[get("/<token>")]
 async fn stream_token(mut close: Shutdown, token: &str) -> EventStream![Event + '_] {
     println!("Resgistering token: {}", token);
-
     let resp = EventStream!{
-        let _d = DropGuard;
-        let mut rx = pump::stream_token(token).await;
+        let mut rx = Box::pin(pump::stream_token(token).await);
         loop {
             tokio::select! {
                 _ = &mut close => {
                     println!("Client stopped");
                     break; 
                 }
-                Some(m) = rx.recv() => {
+                Some(m) = rx.next() => {
                     match serde_json::to_string(&m) {
                         Ok(s) => {
                             let r = yield Event::data(s);
@@ -44,6 +36,7 @@ async fn stream_token(mut close: Shutdown, token: &str) -> EventStream![Event + 
                             println!("Failed to encode account message: {:?}, {:?}", m, e);
                         }
                     }
+
                 }
             }
         }
